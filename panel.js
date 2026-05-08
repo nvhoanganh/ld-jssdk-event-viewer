@@ -216,10 +216,88 @@ function updateFeatureFlagsTable(flagsData) {
     reasonCell.className = 'data-table-cell';
     reasonCell.innerHTML = formatFlagReason(flag.reason);
     
+    keyCell.classList.add('flag-key-hoverable');
+    keyCell.addEventListener('mouseenter', (e) => highlightFlagComponents(flagKey, e.currentTarget));
+    keyCell.addEventListener('mouseleave', clearFlagHighlights);
+
     row.appendChild(keyCell);
     row.appendChild(valueCell);
     row.appendChild(reasonCell);
     tableBody.appendChild(row);
+  }
+}
+
+// Shared tooltip element for showing highlight count
+let _flagHoverTooltip = null;
+function getFlagHoverTooltip() {
+  if (!_flagHoverTooltip) {
+    _flagHoverTooltip = document.createElement('div');
+    _flagHoverTooltip.id = 'flag-hover-tooltip';
+    document.body.appendChild(_flagHoverTooltip);
+  }
+  return _flagHoverTooltip;
+}
+
+function highlightFlagComponents(flagKey, anchorEl) {
+  const tooltip = getFlagHoverTooltip();
+  const rect = anchorEl.getBoundingClientRect();
+  tooltip.textContent = 'Scanning…';
+  tooltip.className = 'flag-hover-tooltip flag-hover-tooltip--visible';
+  tooltip.style.left = rect.left + 'px';
+  tooltip.style.top = (rect.bottom + 4) + 'px';
+
+  try {
+    chrome.scripting.executeScript(
+      {
+        target: { tabId: chrome.devtools.inspectedWindow.tabId },
+        func: (key) => {
+          const els = document.querySelectorAll(`[data-ld-flags~="${key}"]`);
+          els.forEach((el) => {
+            el._ldOrigOutline = el.style.outline;
+            el._ldOrigOutlineOffset = el.style.outlineOffset;
+            el.style.outline = '2px solid #2563eb';
+            el.style.outlineOffset = '3px';
+            el.setAttribute('data-ld-highlighted', '');
+          });
+          return els.length;
+        },
+        args: [flagKey],
+      },
+      (results) => {
+        if (chrome.runtime.lastError || !results || !results[0]) {
+          tooltip.textContent = 'Unable to scan page';
+          return;
+        }
+        const count = results[0].result;
+        tooltip.textContent = count > 0
+          ? `${count} component${count !== 1 ? 's' : ''} highlighted`
+          : 'No tagged components found';
+      }
+    );
+  } catch (err) {
+    tooltip.textContent = 'Unable to scan page';
+  }
+}
+
+function clearFlagHighlights() {
+  const tooltip = getFlagHoverTooltip();
+  tooltip.className = 'flag-hover-tooltip';
+
+  try {
+    chrome.scripting.executeScript({
+      target: { tabId: chrome.devtools.inspectedWindow.tabId },
+      func: () => {
+        document.querySelectorAll('[data-ld-highlighted]').forEach((el) => {
+          el.style.outline = el._ldOrigOutline || '';
+          el.style.outlineOffset = el._ldOrigOutlineOffset || '';
+          el.removeAttribute('data-ld-highlighted');
+          delete el._ldOrigOutline;
+          delete el._ldOrigOutlineOffset;
+        });
+      },
+    });
+  } catch (err) {
+    // ignore
   }
 }
 
